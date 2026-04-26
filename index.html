@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Strobe Browser Tuner</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<main>
+  <header>
+    <h1>Strobe Browser Tuner</h1>
+    <p class="subtitle">WebGL2 strobe-disk simulation</p>
+  </header>
+
+  <div id="canvasWrap" class="canvas-wrap single-mode">
+    <canvas id="strobe"></canvas>
+    <div id="strobeLabels"></div>
+  </div>
+
+  <section class="readout">
+    <div><span class="label">Strobe</span><strong id="targetReadout">&mdash;</strong></div>
+    <div><span class="label">Audio</span><strong id="inputReadout">&mdash;</strong></div>
+    <div><span class="label">FPS</span><strong id="fpsReadout">&mdash;</strong></div>
+  </section>
+
+  <section class="controls">
+    <div class="row">
+      <label class="checkbox">
+        <input type="checkbox" id="multiMode" />
+        <span>12-note multi-strobe display</span>
+      </label>
+    </div>
+
+    <label class="slider" id="strobeRateRow">
+      <div class="slider-row">
+        <span>Strobe rate</span>
+        <span class="rate-input-wrap">
+          <input type="number" id="rateInput" min="0.01" max="5000" step="any" />
+          <span>Hz</span>
+        </span>
+      </div>
+      <input type="range" id="rateSlider" min="0" max="10.9658" step="any" />
+    </label>
+
+    <div class="row">
+      <label class="grow">Audio source
+        <select id="audioSource">
+          <option value="sine" selected>Synthetic sine</option>
+          <option value="mic">Microphone (default)</option>
+          <option value="loopback">System / tab audio (Chrome)</option>
+        </select>
+      </label>
+    </div>
+
+    <label class="slider" id="audioFreqControl">
+      <div class="slider-row">
+        <span>Audio frequency</span>
+        <span class="rate-input-wrap">
+          <input type="number" id="audioFreqInput" min="0.01" max="20000" step="any" />
+          <span>Hz</span>
+        </span>
+      </div>
+      <input type="range" id="audioFreqSlider" min="0" max="10.9658" step="any" />
+    </label>
+
+    <label class="slider" id="detuneControl">
+      <div class="slider-row">
+        <span>Detune (audio)</span>
+        <span id="detuneValue">0.0&cent;</span>
+      </div>
+      <input type="range" id="detune" min="-100" max="100" step="0.1" value="0" />
+    </label>
+
+    <div class="note-buttons" id="noteButtons"></div>
+
+    <div class="row">
+      <span class="label">Octave</span>
+      <div class="btn-group" id="octaveButtons">
+        <button data-octave="2">2</button>
+        <button data-octave="3">3</button>
+        <button data-octave="4" class="active">4</button>
+        <button data-octave="5">5</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <label>Rings
+        <select id="rings">
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+        </select>
+      </label>
+      <label>Samples
+        <select id="samples">
+          <option value="32">32</option>
+          <option value="64" selected>64</option>
+          <option value="128">128</option>
+          <option value="256">256</option>
+        </select>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="playTone" />
+        <span>Play audio frequency through speakers</span>
+      </label>
+    </div>
+  </section>
+
+  <footer>
+    <p>Strobe rate sets the lock frequency of the inner ring (which has 2 segment-pairs &mdash; B/W/B/W). The disk internally rotates at half this rate. Outer rings (4, 8, 16 pairs) lock at 2&times;, 4&times;, 8&times; the strobe rate. Picking an audio source (microphone or tab audio) replaces the synthetic sine with real-time samples; for tab audio, choose a tab in the share dialog and check &ldquo;Share tab audio&rdquo;.</p>
+  </footer>
+</main>
+<script src="src/main.js"></script>
+</body>
+</html>
