@@ -33,6 +33,7 @@ uniform sampler2D u_audioTex;
 uniform int u_useAudioBuf;
 uniform float u_audioStart;
 uniform float u_audioStep;
+uniform float u_alpha;
 
 const float TAU = 6.28318530717959;
 const int MAX_SAMPLES = 256;
@@ -42,12 +43,12 @@ void main() {
     float theta = atan(v_pos.y, v_pos.x);
 
     if (r > u_outerR + 0.005) {
-        outColor = vec4(0.05, 0.06, 0.08, 1.0);
+        outColor = vec4(0.05, 0.06, 0.08, u_alpha);
         return;
     }
     if (r < u_innerR) {
         float h = smoothstep(u_innerR, u_innerR - 0.02, r);
-        outColor = vec4(vec3(0.10 + 0.04 * h), 1.0);
+        outColor = vec4(vec3(0.10 + 0.04 * h), u_alpha);
         return;
     }
 
@@ -94,7 +95,7 @@ void main() {
     float edge = min(ringFrac, 1.0 - ringFrac);
     if (edge < 0.012) brightness *= edge / 0.012;
 
-    outColor = vec4(vec3(brightness), 1.0);
+    outColor = vec4(vec3(brightness), u_alpha);
 }
 `;
 
@@ -123,6 +124,7 @@ uniform sampler2D u_audioTex;
 uniform int u_useAudioBuf;
 uniform float u_audioStart;
 uniform float u_audioStep;
+uniform float u_alpha;
 
 const float TAU = 6.28318530717959;
 const int MAX_SAMPLES = 256;
@@ -145,7 +147,7 @@ void main() {
         float angleFromUp = atan(local.x, -local.y);
         if (abs(angleFromUp) > ARC_HALF_ANGLE) continue;
         if (dist < strobeR * u_innerR) {
-            outColor = vec4(0.10, 0.11, 0.14, 1.0);
+            outColor = vec4(0.10, 0.11, 0.14, u_alpha);
             return;
         }
         hitIdx = i;
@@ -155,7 +157,7 @@ void main() {
     }
 
     if (hitIdx < 0) {
-        outColor = vec4(0.05, 0.06, 0.08, 1.0);
+        outColor = vec4(0.05, 0.06, 0.08, u_alpha);
         return;
     }
 
@@ -209,7 +211,18 @@ void main() {
     float edge = min(ringFrac, 1.0 - ringFrac);
     if (edge < 0.012) brightness *= edge / 0.012;
 
-    outColor = vec4(vec3(brightness), 1.0);
+    outColor = vec4(vec3(brightness), u_alpha);
+}
+`;
+
+const FRAGMENT_SHADER_BLIT = `#version 300 es
+precision highp float;
+in vec2 v_pos;
+out vec4 outColor;
+uniform sampler2D u_tex;
+void main() {
+    vec2 uv = v_pos * 0.5 + 0.5;
+    outColor = vec4(texture(u_tex, uv).rgb, 1.0);
 }
 `;
 
@@ -273,11 +286,41 @@ const state = {
     activeOctave: 4,
     numRings: 4,
     samples: 64,
+    persistence: 60,
     diskPhase: 0,
     audioPhase: 0,
     lastFrameTime: 0,
     fpsAvg: 60,
 };
+
+function persistenceToAlpha(p) {
+    return Math.max(0.05, 1 - (p / 100) * 0.95);
+}
+
+const PERSIST_KEY = 'strobe-tuner-state-v1';
+const PERSIST_FIELDS = ['mode', 'fStrobe', 'audioFreq', 'detuneCents',
+    'activeNoteIdx', 'activeOctave', 'numRings', 'samples', 'persistence'];
+
+function loadPersisted() {
+    try {
+        const raw = localStorage.getItem(PERSIST_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        for (const k of PERSIST_FIELDS) {
+            if (data[k] !== undefined) state[k] = data[k];
+        }
+    } catch (_) { /* corrupt entry; ignore */ }
+}
+
+function savePersisted() {
+    try {
+        const out = {};
+        for (const k of PERSIST_FIELDS) out[k] = state[k];
+        localStorage.setItem(PERSIST_KEY, JSON.stringify(out));
+    } catch (_) {}
+}
+
+loadPersisted();
 
 const multiPhases  = new Float32Array(MULTI_COUNT);
 const multiFreqs   = new Float32Array(MULTI_COUNT);
@@ -458,14 +501,19 @@ function getUniforms(prog, names) {
 
 const SINGLE_UNIFORMS = ['u_diskPhase', 'u_audioPhase', 'u_fDisk', 'u_fAudio', 'u_dt',
     'u_innerR', 'u_outerR', 'u_numRings', 'u_samples',
-    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep'];
+    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha'];
 const MULTI_UNIFORMS = ['u_canvasSize', 'u_strobeCenters', 'u_strobeRadii',
     'u_strobePhases', 'u_strobeFreqs', 'u_strobeCount',
     'u_audioPhase', 'u_fAudio', 'u_dt', 'u_innerR', 'u_outerR', 'u_numRings', 'u_samples',
-    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep'];
+    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha'];
 
 const uSingle = getUniforms(programSingle, SINGLE_UNIFORMS);
 const uMulti  = getUniforms(programMulti, MULTI_UNIFORMS);
+
+const programBlit = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_BLIT);
+const uBlit = getUniforms(programBlit, ['u_tex']);
+gl.useProgram(programBlit);
+gl.uniform1i(uBlit.u_tex, 1);
 
 const audioTex = gl.createTexture();
 gl.activeTexture(gl.TEXTURE0);
@@ -480,6 +528,38 @@ gl.uniform1i(uSingle.u_audioTex, 0);
 gl.useProgram(programMulti);
 gl.uniform1i(uMulti.u_audioTex, 0);
 
+const accumTex = gl.createTexture();
+gl.activeTexture(gl.TEXTURE1);
+gl.bindTexture(gl.TEXTURE_2D, accumTex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+const accumFBO = gl.createFramebuffer();
+
+let accumW = 0, accumH = 0;
+
+function resizeAccum(w, h) {
+    if (accumW === w && accumH === h) return;
+    accumW = w;
+    accumH = h;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, accumTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTex, 0);
+    clearAccum();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function clearAccum() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
+    gl.viewport(0, 0, accumW, accumH);
+    gl.disable(gl.BLEND);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+}
+
 function resizeCanvas() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const rect = canvas.getBoundingClientRect();
@@ -488,7 +568,7 @@ function resizeCanvas() {
     if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
-        gl.viewport(0, 0, w, h);
+        resizeAccum(w, h);
         if (state.mode === 'multi') {
             updateMultiLayout();
             updateLabels();
@@ -648,6 +728,7 @@ function renderSingle(dt) {
         gl.uniform1f(uSingle.u_audioStart, 0);
         gl.uniform1f(uSingle.u_audioStep, 0);
     }
+    gl.uniform1f(uSingle.u_alpha, persistenceToAlpha(state.persistence));
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -692,6 +773,7 @@ function renderMulti(dt) {
         gl.uniform1f(uMulti.u_audioStart, 0);
         gl.uniform1f(uMulti.u_audioStep, 0);
     }
+    gl.uniform1f(uMulti.u_alpha, persistenceToAlpha(state.persistence));
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -707,8 +789,20 @@ function renderMulti(dt) {
 
 function render(dt) {
     resizeCanvas();
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
     if (state.mode === 'multi') renderMulti(dt);
     else renderSingle(dt);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(programBlit);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
 function loop(timeMs) {
@@ -774,6 +868,7 @@ for (let i = 0; i < 12; i++) {
         syncRateUI();
         syncAudioFreqUI();
         updateNoteHighlight();
+        savePersisted();
     });
     noteContainer.appendChild(btn);
     noteButtonEls.push(btn);
@@ -789,6 +884,7 @@ octaveBtns.forEach(btn => {
         syncAudioFreqUI();
         updateNoteHighlight();
         if (state.mode === 'multi') updateLabels();
+        savePersisted();
     });
 });
 
@@ -803,7 +899,9 @@ function commitRateInput() {
     state.fStrobe = Math.min(5000, Math.max(0.01, v));
     syncRateUI();
     updateNoteHighlight();
+    savePersisted();
 }
+rateSlider.addEventListener('change', savePersisted);
 rateInput.addEventListener('change', commitRateInput);
 rateInput.addEventListener('keydown', e => { if (e.key === 'Enter') rateInput.blur(); });
 
@@ -812,11 +910,13 @@ audioFreqSlider.addEventListener('input', () => {
     audioFreqInput.value = fmtFreq(state.audioFreq);
     updateNoteHighlight();
 });
+audioFreqSlider.addEventListener('change', savePersisted);
 function commitAudioFreqInput() {
     const v = parseFloat(audioFreqInput.value);
     if (!isFinite(v) || v <= 0) { syncAudioFreqUI(); return; }
     state.audioFreq = Math.min(20000, Math.max(0.01, v));
     syncAudioFreqUI();
+    savePersisted();
 }
 audioFreqInput.addEventListener('change', commitAudioFreqInput);
 audioFreqInput.addEventListener('keydown', e => { if (e.key === 'Enter') audioFreqInput.blur(); });
@@ -828,12 +928,23 @@ detuneSlider.addEventListener('input', () => {
     const sign = state.detuneCents >= 0 ? '+' : '';
     detuneVal.textContent = `${sign}${state.detuneCents.toFixed(1)}\u00A2`;
 });
+detuneSlider.addEventListener('change', savePersisted);
+
+const persistenceSlider = document.getElementById('persistence');
+const persistenceVal = document.getElementById('persistenceValue');
+persistenceSlider.addEventListener('input', () => {
+    state.persistence = parseFloat(persistenceSlider.value);
+    persistenceVal.textContent = `${state.persistence.toFixed(0)}%`;
+});
+persistenceSlider.addEventListener('change', savePersisted);
 
 document.getElementById('rings').addEventListener('change', e => {
     state.numRings = parseInt(e.target.value, 10);
+    savePersisted();
 });
 document.getElementById('samples').addEventListener('change', e => {
     state.samples = parseInt(e.target.value, 10);
+    savePersisted();
 });
 document.getElementById('playTone').addEventListener('change', e => {
     if (e.target.checked) {
@@ -880,9 +991,13 @@ function setMode(mode) {
             updateMultiLayout();
             updateLabels();
         }
+        if (accumW > 0) clearAccum();
     });
 }
-multiToggle.addEventListener('change', e => setMode(e.target.checked ? 'multi' : 'single'));
+multiToggle.addEventListener('change', e => {
+    setMode(e.target.checked ? 'multi' : 'single');
+    savePersisted();
+});
 
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.addEventListener('devicechange', refreshDeviceList);
@@ -903,9 +1018,25 @@ window.addEventListener('resize', () => {
     }
 });
 
-syncRateUI();
-syncAudioFreqUI();
-updateNoteHighlight();
-updateSourceUI();
-setMode('single');
+function syncAllUI() {
+    syncRateUI();
+    syncAudioFreqUI();
+    detuneSlider.value = String(state.detuneCents);
+    const dSign = state.detuneCents >= 0 ? '+' : '';
+    detuneVal.textContent = `${dSign}${state.detuneCents.toFixed(1)}\u00A2`;
+    persistenceSlider.value = String(state.persistence);
+    persistenceVal.textContent = `${state.persistence.toFixed(0)}%`;
+    document.getElementById('rings').value = String(state.numRings);
+    document.getElementById('samples').value = String(state.samples);
+    multiToggle.checked = (state.mode === 'multi');
+    document.getElementById('playTone').checked = false;
+    sourceSelect.value = 'sine';
+    state.audioMode = 'sine';
+    state.activeSource = 'sine';
+    updateNoteHighlight();
+    updateSourceUI();
+}
+
+syncAllUI();
+setMode(state.mode);
 requestAnimationFrame(loop);
