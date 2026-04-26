@@ -105,10 +105,10 @@ in vec2 v_pos;
 out vec4 outColor;
 
 uniform vec2 u_canvasSize;
-uniform vec2 u_strobeCenters[13];
-uniform float u_strobeRadii[13];
-uniform float u_strobePhases[13];
-uniform float u_strobeFreqs[13];
+uniform vec2 u_strobeCenters[12];
+uniform float u_strobeRadii[12];
+uniform float u_strobePhases[12];
+uniform float u_strobeFreqs[12];
 uniform int u_strobeCount;
 
 uniform float u_audioPhase;
@@ -126,7 +126,7 @@ uniform float u_audioStep;
 
 const float TAU = 6.28318530717959;
 const int MAX_SAMPLES = 256;
-const int MAX_STROBES = 13;
+const int MAX_STROBES = 12;
 const float ARC_HALF_ANGLE = 1.04719755;
 
 void main() {
@@ -220,11 +220,12 @@ const RATE_MAX = 2000;
 const RATE_LOG_MAX = Math.log2(RATE_MAX / RATE_MIN);
 const AUDIO_BUF_LEN = 2048;
 
-// Multi-strobe layout indices
-// Notes 0..12 = C, C#, D, D#, E, F, F#, G, G#, A, A#, B, C(next octave)
-const WHITE_NOTES = [0, 2, 4, 5, 7, 9, 11, 12];
+// Multi-strobe layout: one octave, 12 notes
+// Notes 0..11 = C, C#, D, D#, E, F, F#, G, G#, A, A#, B
+const WHITE_NOTES = [0, 2, 4, 5, 7, 9, 11];
 const BLACK_NOTES = [1, 3, 6, 8, 10];
-const BLACK_X_POS  = [1, 2, 4, 5, 6];   // x position in white-cell-width units
+const BLACK_X_POS = [1, 2, 4, 5, 6];   // x position in white-cell-width units
+const MULTI_COUNT = 12;
 
 function noteFreq(noteIdx, octave) {
     const midi = (octave + 1) * 12 + noteIdx;
@@ -278,10 +279,10 @@ const state = {
     fpsAvg: 60,
 };
 
-const multiPhases  = new Float32Array(13);
-const multiFreqs   = new Float32Array(13);
-const multiCenters = new Float32Array(26);
-const multiRadii   = new Float32Array(13);
+const multiPhases  = new Float32Array(MULTI_COUNT);
+const multiFreqs   = new Float32Array(MULTI_COUNT);
+const multiCenters = new Float32Array(MULTI_COUNT * 2);
+const multiRadii   = new Float32Array(MULTI_COUNT);
 let multiLayoutCSS = null;
 
 let audioCtx = null;
@@ -514,11 +515,8 @@ function uploadAudioBuffer() {
 }
 
 function updateMultiFreqs() {
-    for (let i = 0; i < 13; i++) {
-        let octave = state.activeOctave;
-        let noteIdx = i;
-        if (i === 12) { noteIdx = 0; octave += 1; }
-        multiFreqs[i] = noteFreq(noteIdx, octave) * 0.5;
+    for (let i = 0; i < MULTI_COUNT; i++) {
+        multiFreqs[i] = noteFreq(i, state.activeOctave) * 0.5;
     }
 }
 
@@ -529,39 +527,41 @@ function updateMultiLayout() {
     if (cssW <= 0 || cssH <= 0) return;
     const dpr = canvas.width / cssW;
 
-    const cellW = cssW / 8;
-    const whiteR = cellW * 0.50;
-    const blackR = whiteR * 0.85;
-    const arcHWhite = whiteR * 0.5;
-    const arcHBlack = blackR * 0.5;
-    const labelGap = 22;
-    const margin = 6;
+    const cellW = cssW / 7;
+    const radiusFactor = 0.56;
+    const labelGap = 24;
+    const margin = 8;
 
-    const cellHWhite = arcHWhite + labelGap;
-    const cellHBlack = arcHBlack + labelGap;
+    const horizMaxR = cellW * radiusFactor;
+    const cellHFromR = (r) => r * 0.5 + labelGap;
 
-    const stackGap = 2;
-    const totalH = cellHBlack + stackGap + cellHWhite;
+    const stackGap = 4;
+    const fitR = (cssH - 2 * margin - stackGap - 2 * labelGap) / (2 * 0.5);
+    const r = Math.max(8, Math.min(horizMaxR, fitR));
+
+    const arcH = r * 0.5;
+    const cellH = arcH + labelGap;
+    const totalH = 2 * cellH + stackGap;
     const offsetY = Math.max(margin, (cssH - totalH) / 2);
     const topCellTop = offsetY;
-    const bottomCellTop = offsetY + cellHBlack + stackGap;
+    const bottomCellTop = offsetY + cellH + stackGap;
 
-    const positions = new Array(13);
+    const positions = new Array(MULTI_COUNT);
 
     WHITE_NOTES.forEach((noteIdx, col) => {
         const cx = (col + 0.5) * cellW;
-        const cy = bottomCellTop + whiteR;
-        positions[noteIdx] = { cx, cy, r: whiteR, isBlack: false, arcBottomY: cy - whiteR * 0.5 };
+        const cy = bottomCellTop + r;
+        positions[noteIdx] = { cx, cy, r, arcBottomY: cy - r * 0.5 };
     });
 
     BLACK_NOTES.forEach((noteIdx, i) => {
         const cx = BLACK_X_POS[i] * cellW;
-        const cy = topCellTop + blackR;
-        positions[noteIdx] = { cx, cy, r: blackR, isBlack: true, arcBottomY: cy - blackR * 0.5 };
+        const cy = topCellTop + r;
+        positions[noteIdx] = { cx, cy, r, arcBottomY: cy - r * 0.5 };
     });
 
     multiLayoutCSS = positions;
-    for (let i = 0; i < 13; i++) {
+    for (let i = 0; i < MULTI_COUNT; i++) {
         multiCenters[2 * i] = positions[i].cx * dpr;
         multiCenters[2 * i + 1] = positions[i].cy * dpr;
         multiRadii[i] = positions[i].r * dpr;
@@ -569,7 +569,7 @@ function updateMultiLayout() {
 }
 
 const labelEls = [];
-for (let i = 0; i < 13; i++) {
+for (let i = 0; i < MULTI_COUNT; i++) {
     const el = document.createElement('div');
     el.className = 'strobe-label';
     const noteEl = document.createElement('span');
@@ -586,22 +586,19 @@ for (let i = 0; i < 13; i++) {
 
 function updateLabels() {
     if (!multiLayoutCSS) return;
-    for (let i = 0; i < 13; i++) {
+    const oct = state.activeOctave;
+    for (let i = 0; i < MULTI_COUNT; i++) {
         const pos = multiLayoutCSS[i];
-        const top = pos.arcBottomY + 3;
         labelEls[i].el.style.left = pos.cx + 'px';
-        labelEls[i].el.style.top = top + 'px';
-        let octave = state.activeOctave;
-        let noteIdx = i;
-        if (i === 12) { noteIdx = 0; octave += 1; }
-        labelEls[i].noteEl.textContent = NOTE_NAMES[noteIdx] + octave;
-        labelEls[i].freqEl.textContent = noteFreq(noteIdx, octave).toFixed(1);
+        labelEls[i].el.style.top = (pos.arcBottomY + 3) + 'px';
+        labelEls[i].noteEl.textContent = NOTE_NAMES[i] + oct;
+        labelEls[i].freqEl.textContent = noteFreq(i, oct).toFixed(1);
     }
 }
 
 function advanceMultiPhases(dt) {
     const TAU = 2 * Math.PI;
-    for (let i = 0; i < 13; i++) {
+    for (let i = 0; i < MULTI_COUNT; i++) {
         multiPhases[i] = (multiPhases[i] + TAU * multiFreqs[i] * dt) % TAU;
     }
 }
@@ -677,7 +674,7 @@ function renderMulti(dt) {
     gl.uniform1fv(uMulti.u_strobeRadii, multiRadii);
     gl.uniform1fv(uMulti.u_strobePhases, multiPhases);
     gl.uniform1fv(uMulti.u_strobeFreqs, multiFreqs);
-    gl.uniform1i(uMulti.u_strobeCount, 13);
+    gl.uniform1i(uMulti.u_strobeCount, MULTI_COUNT);
     gl.uniform1f(uMulti.u_audioPhase, state.audioPhase);
     gl.uniform1f(uMulti.u_fAudio, fAudio);
     gl.uniform1f(uMulti.u_dt, dt);

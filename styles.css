@@ -66,8 +66,8 @@ header h1 {
 }
 
 .canvas-wrap.multi-mode canvas {
-    aspect-ratio: 8 / 1;
-    min-height: 110px;
+    aspect-ratio: 5 / 1;
+    min-height: 180px;
     border-radius: 0;
     border-left: none;
     border-right: none;
