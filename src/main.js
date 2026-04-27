@@ -1,8 +1,7 @@
 // Strobe Browser Tuner — POC
 // Two display modes:
 //   single — one full-circle strobe disk
-//   multi  — 13-note piano layout, each note shown as a 120° arc strobe
-// LED source: synthetic sine, microphone, or system-audio capture.
+//   multi  — 13-note piano layout, each note shown as a 90° arc strobe
 
 const VERTEX_SHADER = `#version 300 es
 in vec2 a_position;
@@ -26,48 +25,46 @@ uniform float u_fAudio;
 uniform float u_dt;
 uniform float u_innerR;
 uniform float u_outerR;
-uniform int u_numRings;
-uniform int u_samples;
+uniform float u_gamma;
+uniform float u_ledThreshold;
+uniform float u_ledNorm;
 
 uniform sampler2D u_audioTex;
 uniform int u_useAudioBuf;
 uniform float u_audioStart;
 uniform float u_audioStep;
-uniform float u_alpha;
-uniform float u_floor;
-uniform float u_gamma;
 
 const float TAU = 6.28318530717959;
-const int MAX_SAMPLES = 256;
+const int NUM_RINGS = 7;
+const int SAMPLES = 256;
 
 void main() {
     float r = length(v_pos);
     float theta = atan(v_pos.y, v_pos.x);
 
     if (r > u_outerR + 0.005) {
-        outColor = vec4(0.05, 0.06, 0.08, u_alpha);
+        outColor = vec4(0.05, 0.06, 0.08, 1.0);
         return;
     }
     if (r < u_innerR) {
         float h = smoothstep(u_innerR, u_innerR - 0.02, r);
-        outColor = vec4(vec3(0.10 + 0.04 * h), u_alpha);
+        outColor = vec4(vec3(0.10 + 0.04 * h), 1.0);
         return;
     }
 
-    float ringSpan = (u_outerR - u_innerR) / float(u_numRings);
+    float ringSpan = (u_outerR - u_innerR) / float(NUM_RINGS);
     float ringPos = (r - u_innerR) / ringSpan;
     int ringIdx = int(floor(ringPos));
-    if (ringIdx >= u_numRings) ringIdx = u_numRings - 1;
+    if (ringIdx >= NUM_RINGS) ringIdx = NUM_RINGS - 1;
     float ringN = pow(2.0, float(ringIdx + 1));
 
     float omegaDisk = TAU * u_fDisk;
     float omegaAudio = TAU * u_fAudio;
-    float invSamples = 1.0 / float(u_samples);
+    float invSamples = 1.0 / float(SAMPLES);
 
     float accum = 0.0;
 
-    for (int i = 0; i < MAX_SAMPLES; i++) {
-        if (i >= u_samples) break;
+    for (int i = 0; i < SAMPLES; i++) {
         float frac = (float(i) + 0.5) * invSamples;
         float t = frac * u_dt;
 
@@ -79,27 +76,23 @@ void main() {
         if (u_useAudioBuf == 1) {
             float u = u_audioStart + frac * u_audioStep;
             float s = texture(u_audioTex, vec2(u, 0.5)).r * 2.0 - 1.0;
-            led = max(0.0, s);
+            led = step(u_ledThreshold, s);
         } else {
             float audioCos = cos(u_audioPhase + omegaAudio * t);
-            led = max(0.0, audioCos);
+            led = step(u_ledThreshold, audioCos);
         }
 
         accum += mask * led;
     }
 
-    // Mean of (mask * LED) over the window; loud locked ≈ 0.5, scale to ≈1.
-    // No normalization by ledNorm so amplitude carries through to brightness.
-    float brightness = accum * (2.0 * invSamples);
-    brightness = clamp(brightness, 0.0, 1.0);
+    float brightness = clamp(accum * u_ledNorm * invSamples, 0.0, 1.0);
     brightness = pow(brightness, u_gamma);
-    brightness = u_floor + (1.0 - u_floor) * brightness;
 
     float ringFrac = ringPos - float(ringIdx);
     float edge = min(ringFrac, 1.0 - ringFrac);
     if (edge < 0.012) brightness *= edge / 0.012;
 
-    outColor = vec4(vec3(brightness), u_alpha);
+    outColor = vec4(brightness, brightness * 0.15, brightness * 0.1, 1.0);
 }
 `;
 
@@ -121,21 +114,20 @@ uniform float u_fAudio;
 uniform float u_dt;
 uniform float u_innerR;
 uniform float u_outerR;
-uniform int u_numRings;
-uniform int u_samples;
+uniform float u_gamma;
+uniform float u_ledThreshold;
+uniform float u_ledNorm;
 
 uniform sampler2D u_audioTex;
 uniform int u_useAudioBuf;
 uniform float u_audioStart;
 uniform float u_audioStep;
-uniform float u_alpha;
-uniform float u_floor;
-uniform float u_gamma;
 
 const float TAU = 6.28318530717959;
-const int MAX_SAMPLES = 256;
 const int MAX_STROBES = 12;
-const float ARC_HALF_ANGLE = 1.04719755;
+const int NUM_RINGS = 7;
+const int SAMPLES = 256;
+const float ARC_HALF_ANGLE = 0.7853981634;
 
 void main() {
     vec2 px = vec2(gl_FragCoord.x, u_canvasSize.y - gl_FragCoord.y);
@@ -153,7 +145,7 @@ void main() {
         float angleFromUp = atan(local.x, -local.y);
         if (abs(angleFromUp) > ARC_HALF_ANGLE) continue;
         if (dist < strobeR * u_innerR) {
-            outColor = vec4(0.10, 0.11, 0.14, u_alpha);
+            outColor = vec4(0.10, 0.11, 0.14, 1.0);
             return;
         }
         hitIdx = i;
@@ -163,7 +155,7 @@ void main() {
     }
 
     if (hitIdx < 0) {
-        outColor = vec4(0.05, 0.06, 0.08, u_alpha);
+        outColor = vec4(0.05, 0.06, 0.08, 1.0);
         return;
     }
 
@@ -174,20 +166,19 @@ void main() {
     float fDisk = u_strobeFreqs[hitIdx];
     float diskPhase = u_strobePhases[hitIdx];
 
-    float ringSpan = (u_outerR - u_innerR) / float(u_numRings);
+    float ringSpan = (u_outerR - u_innerR) / float(NUM_RINGS);
     float ringPos = (r_norm - u_innerR) / ringSpan;
     int ringIdx = int(floor(ringPos));
-    if (ringIdx >= u_numRings) ringIdx = u_numRings - 1;
+    if (ringIdx >= NUM_RINGS) ringIdx = NUM_RINGS - 1;
     float ringN = pow(2.0, float(ringIdx + 1));
 
     float omegaDisk = TAU * fDisk;
     float omegaAudio = TAU * u_fAudio;
-    float invSamples = 1.0 / float(u_samples);
+    float invSamples = 1.0 / float(SAMPLES);
 
     float accum = 0.0;
 
-    for (int j = 0; j < MAX_SAMPLES; j++) {
-        if (j >= u_samples) break;
+    for (int j = 0; j < SAMPLES; j++) {
         float frac = (float(j) + 0.5) * invSamples;
         float t = frac * u_dt;
 
@@ -199,36 +190,23 @@ void main() {
         if (u_useAudioBuf == 1) {
             float u = u_audioStart + frac * u_audioStep;
             float s = texture(u_audioTex, vec2(u, 0.5)).r * 2.0 - 1.0;
-            led = max(0.0, s);
+            led = step(u_ledThreshold, s);
         } else {
             float audioCos = cos(u_audioPhase + omegaAudio * t);
-            led = max(0.0, audioCos);
+            led = step(u_ledThreshold, audioCos);
         }
 
         accum += mask * led;
     }
 
-    float brightness = accum * (2.0 * invSamples);
-    brightness = clamp(brightness, 0.0, 1.0);
+    float brightness = clamp(accum * u_ledNorm * invSamples, 0.0, 1.0);
     brightness = pow(brightness, u_gamma);
-    brightness = u_floor + (1.0 - u_floor) * brightness;
 
     float ringFrac = ringPos - float(ringIdx);
     float edge = min(ringFrac, 1.0 - ringFrac);
     if (edge < 0.012) brightness *= edge / 0.012;
 
-    outColor = vec4(vec3(brightness), u_alpha);
-}
-`;
-
-const FRAGMENT_SHADER_BLIT = `#version 300 es
-precision highp float;
-in vec2 v_pos;
-out vec4 outColor;
-uniform sampler2D u_tex;
-void main() {
-    vec2 uv = v_pos * 0.5 + 0.5;
-    outColor = vec4(texture(u_tex, uv).rgb, 1.0);
+    outColor = vec4(brightness, brightness * 0.15, brightness * 0.1, 1.0);
 }
 `;
 
@@ -239,12 +217,19 @@ const RATE_MAX = 2000;
 const RATE_LOG_MAX = Math.log2(RATE_MAX / RATE_MIN);
 const AUDIO_BUF_LEN = 2048;
 
-// Multi-strobe layout: one octave, 12 notes
-// Notes 0..11 = C, C#, D, D#, E, F, F#, G, G#, A, A#, B
+// LED threshold: fire when signal exceeds its own RMS level.
+// For a pure sine this fires ~25% of the cycle; ledNorm=4 normalises locked brightness to 1.
+// Using RMS (not peak) makes the threshold robust to transients and high-crest-factor signals.
+const LED_THRESHOLD_SINE = 1.0 / Math.SQRT2; // RMS of unit-amplitude sine ≈ 0.707
+const LED_NORM = 4.0;                          // 1 / duty_cycle (duty ≈ 0.25 at RMS threshold)
+let ledThreshold = LED_THRESHOLD_SINE;
+let ledNorm = LED_NORM;
+
 const WHITE_NOTES = [0, 2, 4, 5, 7, 9, 11];
 const BLACK_NOTES = [1, 3, 6, 8, 10];
-const BLACK_X_POS = [1, 2, 4, 5, 6];   // x position in white-cell-width units
+const BLACK_X_POS = [1, 2, 4, 5, 6];
 const MULTI_COUNT = 12;
+
 
 function noteFreq(noteIdx, octave) {
     const midi = (octave + 1) * 12 + noteIdx;
@@ -290,25 +275,16 @@ const state = {
     activeSource: 'sine',
     activeNoteIdx: 9,
     activeOctave: 4,
-    numRings: 4,
-    samples: 64,
-    persistence: 60,
-    brightnessFloor: 15,
-    gamma: 0.35,
+    gamma: 2.0,
     diskPhase: 0,
     audioPhase: 0,
     lastFrameTime: 0,
     fpsAvg: 60,
 };
 
-function persistenceToAlpha(p) {
-    return Math.max(0.05, 1 - (p / 100) * 0.95);
-}
-
 const PERSIST_KEY = 'strobe-tuner-state-v1';
 const PERSIST_FIELDS = ['mode', 'fStrobe', 'audioFreq', 'detuneCents',
-    'activeNoteIdx', 'activeOctave', 'numRings', 'samples', 'persistence',
-    'brightnessFloor', 'gamma'];
+    'activeNoteIdx', 'activeOctave', 'gamma'];
 
 function loadPersisted() {
     try {
@@ -318,7 +294,7 @@ function loadPersisted() {
         for (const k of PERSIST_FIELDS) {
             if (data[k] !== undefined) state[k] = data[k];
         }
-    } catch (_) { /* corrupt entry; ignore */ }
+    } catch (_) {}
 }
 
 function savePersisted() {
@@ -510,22 +486,16 @@ function getUniforms(prog, names) {
 }
 
 const SINGLE_UNIFORMS = ['u_diskPhase', 'u_audioPhase', 'u_fDisk', 'u_fAudio', 'u_dt',
-    'u_innerR', 'u_outerR', 'u_numRings', 'u_samples',
-    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha',
-    'u_floor', 'u_gamma'];
+    'u_innerR', 'u_outerR', 'u_gamma', 'u_ledThreshold', 'u_ledNorm',
+    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep'];
 const MULTI_UNIFORMS = ['u_canvasSize', 'u_strobeCenters', 'u_strobeRadii',
     'u_strobePhases', 'u_strobeFreqs', 'u_strobeCount',
-    'u_audioPhase', 'u_fAudio', 'u_dt', 'u_innerR', 'u_outerR', 'u_numRings', 'u_samples',
-    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha',
-    'u_floor', 'u_gamma'];
+    'u_audioPhase', 'u_fAudio', 'u_dt', 'u_innerR', 'u_outerR', 'u_gamma',
+    'u_ledThreshold', 'u_ledNorm',
+    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep'];
 
 const uSingle = getUniforms(programSingle, SINGLE_UNIFORMS);
 const uMulti  = getUniforms(programMulti, MULTI_UNIFORMS);
-
-const programBlit = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_BLIT);
-const uBlit = getUniforms(programBlit, ['u_tex']);
-gl.useProgram(programBlit);
-gl.uniform1i(uBlit.u_tex, 1);
 
 const audioTex = gl.createTexture();
 gl.activeTexture(gl.TEXTURE0);
@@ -540,38 +510,6 @@ gl.uniform1i(uSingle.u_audioTex, 0);
 gl.useProgram(programMulti);
 gl.uniform1i(uMulti.u_audioTex, 0);
 
-const accumTex = gl.createTexture();
-gl.activeTexture(gl.TEXTURE1);
-gl.bindTexture(gl.TEXTURE_2D, accumTex);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-const accumFBO = gl.createFramebuffer();
-
-let accumW = 0, accumH = 0;
-
-function resizeAccum(w, h) {
-    if (accumW === w && accumH === h) return;
-    accumW = w;
-    accumH = h;
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, accumTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTex, 0);
-    clearAccum();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-}
-
-function clearAccum() {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
-    gl.viewport(0, 0, accumW, accumH);
-    gl.disable(gl.BLEND);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-}
-
 function resizeCanvas() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const rect = canvas.getBoundingClientRect();
@@ -580,7 +518,6 @@ function resizeCanvas() {
     if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
-        resizeAccum(w, h);
         if (state.mode === 'multi') {
             updateMultiLayout();
             updateLabels();
@@ -595,6 +532,21 @@ const fpsReadout = document.getElementById('fpsReadout');
 function uploadAudioBuffer() {
     if (!analyser) return false;
     analyser.getFloatTimeDomainData(audioBuf);
+
+    // Compute RMS over the buffer; use as threshold so any sustained signal level triggers.
+    // RMS tracks average energy and is immune to brief transient peaks that would
+    // otherwise drive a peak-based threshold too high and starve the display.
+    let sumSq = 0;
+    for (let i = 0; i < AUDIO_BUF_LEN; i++) sumSq += audioBuf[i] * audioBuf[i];
+    const rms = Math.sqrt(sumSq / AUDIO_BUF_LEN);
+    if (rms > 0.005) {
+        ledThreshold = rms;
+        ledNorm = LED_NORM;
+    } else {
+        ledThreshold = 1.1; // silence → never fires
+        ledNorm = 1.0;
+    }
+
     for (let i = 0; i < AUDIO_BUF_LEN; i++) {
         const v = audioBuf[i];
         const c = v < -1 ? -1 : v > 1 ? 1 : v;
@@ -620,19 +572,18 @@ function updateMultiLayout() {
     const dpr = canvas.width / cssW;
 
     const cellW = cssW / 7;
-    const radiusFactor = 0.56;
-    const labelGap = 24;
+    const labelGap = 18;
     const margin = 8;
-
-    const horizMaxR = cellW * radiusFactor;
-    const cellHFromR = (r) => r * 0.5 + labelGap;
-
     const stackGap = 4;
-    const fitR = (cssH - 2 * margin - stackGap - 2 * labelGap) / (2 * 0.5);
+
+    // r is constrained horizontally (±45° arc half-width = r*sin(45°) ≤ cellW/2)
+    // and vertically (two rows of r + labelGap must fit in canvas)
+    const horizMaxR = cellW * 0.45;
+    const fitR = (cssH - 2 * margin - stackGap - 2 * labelGap) / 2;
     const r = Math.max(8, Math.min(horizMaxR, fitR));
 
-    const arcH = r * 0.5;
-    const cellH = arcH + labelGap;
+    // Cell spans from arc top (cy - r) to label bottom (cy + labelGap)
+    const cellH = r + labelGap;
     const totalH = 2 * cellH + stackGap;
     const offsetY = Math.max(margin, (cssH - totalH) / 2);
     const topCellTop = offsetY;
@@ -643,20 +594,20 @@ function updateMultiLayout() {
     WHITE_NOTES.forEach((noteIdx, col) => {
         const cx = (col + 0.5) * cellW;
         const cy = bottomCellTop + r;
-        positions[noteIdx] = { cx, cy, r, arcBottomY: cy - r * 0.5 };
+        positions[noteIdx] = { cx, cy, r, arcBottomY: cy };
     });
 
     BLACK_NOTES.forEach((noteIdx, i) => {
         const cx = BLACK_X_POS[i] * cellW;
         const cy = topCellTop + r;
-        positions[noteIdx] = { cx, cy, r, arcBottomY: cy - r * 0.5 };
+        positions[noteIdx] = { cx, cy, r, arcBottomY: cy };
     });
 
     multiLayoutCSS = positions;
     for (let i = 0; i < MULTI_COUNT; i++) {
-        multiCenters[2 * i] = positions[i].cx * dpr;
+        multiCenters[2 * i]     = positions[i].cx * dpr;
         multiCenters[2 * i + 1] = positions[i].cy * dpr;
-        multiRadii[i] = positions[i].r * dpr;
+        multiRadii[i]           = positions[i].r * dpr;
     }
 }
 
@@ -669,18 +620,12 @@ for (let i = 0; i < MULTI_COUNT; i++) {
     const freqEl = document.createElement('span');
     freqEl.className = 'freq';
     const freq2El = document.createElement('span');
-    freq2El.className = 'freq ring-freq';
-    const freq3El = document.createElement('span');
-    freq3El.className = 'freq ring-freq';
+    freq2El.className = 'freq2';
     el.appendChild(noteEl);
-    el.appendChild(document.createElement('br'));
     el.appendChild(freqEl);
-    el.appendChild(document.createElement('br'));
     el.appendChild(freq2El);
-    el.appendChild(document.createElement('br'));
-    el.appendChild(freq3El);
     labelContainer.appendChild(el);
-    labelEls.push({ el, noteEl, freqEl, freq2El, freq3El });
+    labelEls.push({ el, noteEl, freqEl, freq2El });
 }
 
 function updateLabels() {
@@ -692,9 +637,8 @@ function updateLabels() {
         labelEls[i].el.style.top = (pos.arcBottomY + 3) + 'px';
         labelEls[i].noteEl.textContent = NOTE_NAMES[i] + oct;
         const f = noteFreq(i, oct);
-        labelEls[i].freqEl.textContent = '\u25CE ' + f.toFixed(1) + ' \u25CE';
+        labelEls[i].freqEl.textContent = f.toFixed(1);
         labelEls[i].freq2El.textContent = (f * 2).toFixed(1);
-        labelEls[i].freq3El.textContent = (f * 4).toFixed(1);
     }
 }
 
@@ -715,6 +659,8 @@ function setReadouts(fStrobeRate, fAudio) {
     }
 }
 
+const INNER_R = 2 / 9; // 2 ring-widths of center gap with 7 rings
+
 function renderSingle(dt, elapsed) {
     gl.useProgram(programSingle);
 
@@ -723,19 +669,14 @@ function renderSingle(dt, elapsed) {
     const fAudio = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
     const TAU = 2 * Math.PI;
 
-    // state.diskPhase / audioPhase are kept at "phase as of now" (the render time).
-    // Advancing by true elapsed time guarantees the disk position tracks wall clock,
-    // so audio samples line up with where the disk really is during integration.
     state.diskPhase = (state.diskPhase + TAU * fDiskRotation * elapsed) % TAU;
     state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
 
     const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer();
+    if (!usingBuf) { ledThreshold = LED_THRESHOLD_SINE; ledNorm = LED_NORM; }
     const bufDuration = AUDIO_BUF_LEN / audioBufRate;
-    // When pulling from the audio buffer, the integration window can't exceed
-    // the buffer's own duration, otherwise disk-time and audio-time would diverge.
     const intDt = usingBuf ? Math.min(dt, bufDuration) : dt;
 
-    // Shader integrates from t=0 to t=intDt; pass the phase at t=0 (intDt seconds ago).
     const intDiskPhase = state.diskPhase - TAU * fDiskRotation * intDt;
     const intAudioPhase = state.audioPhase - TAU * fAudio * intDt;
 
@@ -744,10 +685,11 @@ function renderSingle(dt, elapsed) {
     gl.uniform1f(uSingle.u_fDisk, fDiskRotation);
     gl.uniform1f(uSingle.u_fAudio, fAudio);
     gl.uniform1f(uSingle.u_dt, intDt);
-    gl.uniform1f(uSingle.u_innerR, 0.20);
+    gl.uniform1f(uSingle.u_innerR, INNER_R);
     gl.uniform1f(uSingle.u_outerR, 0.92);
-    gl.uniform1i(uSingle.u_numRings, state.numRings);
-    gl.uniform1i(uSingle.u_samples, state.samples);
+    gl.uniform1f(uSingle.u_gamma, state.gamma);
+    gl.uniform1f(uSingle.u_ledThreshold, ledThreshold);
+    gl.uniform1f(uSingle.u_ledNorm, ledNorm);
     gl.uniform1i(uSingle.u_useAudioBuf, usingBuf ? 1 : 0);
     if (usingBuf) {
         const span = Math.min(intDt / bufDuration, 1);
@@ -757,9 +699,6 @@ function renderSingle(dt, elapsed) {
         gl.uniform1f(uSingle.u_audioStart, 0);
         gl.uniform1f(uSingle.u_audioStep, 0);
     }
-    gl.uniform1f(uSingle.u_alpha, persistenceToAlpha(state.persistence));
-    gl.uniform1f(uSingle.u_floor, state.brightnessFloor / 100);
-    gl.uniform1f(uSingle.u_gamma, state.gamma);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -777,14 +716,13 @@ function renderMulti(dt, elapsed) {
     const fAudio = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
     const TAU = 2 * Math.PI;
 
-    // Advance phases to "now" by the true elapsed time so disk positions stay
-    // wall-clock-aligned even when frames stutter.
     for (let i = 0; i < MULTI_COUNT; i++) {
         multiPhases[i] = (multiPhases[i] + TAU * multiFreqs[i] * elapsed) % TAU;
     }
     state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
 
     const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer();
+    if (!usingBuf) { ledThreshold = LED_THRESHOLD_SINE; ledNorm = LED_NORM; }
     const bufDuration = AUDIO_BUF_LEN / audioBufRate;
     const intDt = usingBuf ? Math.min(dt, bufDuration) : dt;
 
@@ -802,10 +740,11 @@ function renderMulti(dt, elapsed) {
     gl.uniform1f(uMulti.u_audioPhase, intAudioPhase);
     gl.uniform1f(uMulti.u_fAudio, fAudio);
     gl.uniform1f(uMulti.u_dt, intDt);
-    gl.uniform1f(uMulti.u_innerR, 0.55);
+    gl.uniform1f(uMulti.u_innerR, INNER_R);
     gl.uniform1f(uMulti.u_outerR, 1.0);
-    gl.uniform1i(uMulti.u_numRings, state.numRings);
-    gl.uniform1i(uMulti.u_samples, state.samples);
+    gl.uniform1f(uMulti.u_gamma, state.gamma);
+    gl.uniform1f(uMulti.u_ledThreshold, ledThreshold);
+    gl.uniform1f(uMulti.u_ledNorm, ledNorm);
     gl.uniform1i(uMulti.u_useAudioBuf, usingBuf ? 1 : 0);
     if (usingBuf) {
         const span = Math.min(intDt / bufDuration, 1);
@@ -815,9 +754,6 @@ function renderMulti(dt, elapsed) {
         gl.uniform1f(uMulti.u_audioStart, 0);
         gl.uniform1f(uMulti.u_audioStep, 0);
     }
-    gl.uniform1f(uMulti.u_alpha, persistenceToAlpha(state.persistence));
-    gl.uniform1f(uMulti.u_floor, state.brightnessFloor / 100);
-    gl.uniform1f(uMulti.u_gamma, state.gamma);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -831,19 +767,12 @@ function renderMulti(dt, elapsed) {
 function render(dt, elapsed) {
     resizeCanvas();
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    if (state.mode === 'multi') renderMulti(dt, elapsed);
-    else renderSingle(dt, elapsed);
-
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.disable(gl.BLEND);
-    gl.useProgram(programBlit);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    if (state.mode === 'multi') renderMulti(dt, elapsed);
+    else renderSingle(dt, elapsed);
 }
 
 function loop(timeMs) {
@@ -852,8 +781,6 @@ function loop(timeMs) {
     state.lastFrameTime = t;
     if (elapsed <= 0) elapsed = 1 / 60;
 
-    // Phase advances by true elapsed (keeps disk wall-clock-aligned across stutters);
-    // integration window is bounded so a hiccup doesn't try to integrate over a huge gap.
     const dt = Math.min(elapsed, 0.1);
 
     state.fpsAvg = state.fpsAvg * 0.92 + (1 / dt) * 0.08;
@@ -975,22 +902,6 @@ detuneSlider.addEventListener('input', () => {
 });
 detuneSlider.addEventListener('change', savePersisted);
 
-const persistenceSlider = document.getElementById('persistence');
-const persistenceVal = document.getElementById('persistenceValue');
-persistenceSlider.addEventListener('input', () => {
-    state.persistence = parseFloat(persistenceSlider.value);
-    persistenceVal.textContent = `${state.persistence.toFixed(0)}%`;
-});
-persistenceSlider.addEventListener('change', savePersisted);
-
-const floorSlider = document.getElementById('floorSlider');
-const floorVal = document.getElementById('floorValue');
-floorSlider.addEventListener('input', () => {
-    state.brightnessFloor = parseFloat(floorSlider.value);
-    floorVal.textContent = `${state.brightnessFloor.toFixed(0)}%`;
-});
-floorSlider.addEventListener('change', savePersisted);
-
 const gammaSlider = document.getElementById('gammaSlider');
 const gammaVal = document.getElementById('gammaValue');
 gammaSlider.addEventListener('input', () => {
@@ -1006,14 +917,6 @@ advancedDetails.addEventListener('toggle', () => {
     localStorage.setItem(ADVANCED_OPEN_KEY, String(advancedDetails.open));
 });
 
-document.getElementById('rings').addEventListener('change', e => {
-    state.numRings = parseInt(e.target.value, 10);
-    savePersisted();
-});
-document.getElementById('samples').addEventListener('change', e => {
-    state.samples = parseInt(e.target.value, 10);
-    savePersisted();
-});
 document.getElementById('playTone').addEventListener('change', e => {
     if (e.target.checked) {
         const f = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
@@ -1059,7 +962,6 @@ function setMode(mode) {
             updateMultiLayout();
             updateLabels();
         }
-        if (accumW > 0) clearAccum();
     });
 }
 multiToggle.addEventListener('change', e => {
@@ -1092,14 +994,8 @@ function syncAllUI() {
     detuneSlider.value = String(state.detuneCents);
     const dSign = state.detuneCents >= 0 ? '+' : '';
     detuneVal.textContent = `${dSign}${state.detuneCents.toFixed(1)}\u00A2`;
-    persistenceSlider.value = String(state.persistence);
-    persistenceVal.textContent = `${state.persistence.toFixed(0)}%`;
-    floorSlider.value = String(state.brightnessFloor);
-    floorVal.textContent = `${state.brightnessFloor.toFixed(0)}%`;
     gammaSlider.value = String(state.gamma);
     gammaVal.textContent = state.gamma.toFixed(2);
-    document.getElementById('rings').value = String(state.numRings);
-    document.getElementById('samples').value = String(state.samples);
     multiToggle.checked = (state.mode === 'multi');
     document.getElementById('playTone').checked = false;
     sourceSelect.value = 'sine';
