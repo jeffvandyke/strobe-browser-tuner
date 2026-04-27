@@ -34,6 +34,8 @@ uniform int u_useAudioBuf;
 uniform float u_audioStart;
 uniform float u_audioStep;
 uniform float u_alpha;
+uniform float u_floor;
+uniform float u_gamma;
 
 const float TAU = 6.28318530717959;
 const int MAX_SAMPLES = 256;
@@ -63,7 +65,6 @@ void main() {
     float invSamples = 1.0 / float(u_samples);
 
     float accum = 0.0;
-    float ledNorm = 0.0;
 
     for (int i = 0; i < MAX_SAMPLES; i++) {
         if (i >= u_samples) break;
@@ -85,11 +86,14 @@ void main() {
         }
 
         accum += mask * led;
-        ledNorm += led;
     }
 
-    float brightness = accum / max(ledNorm, 1e-6);
-    brightness = pow(brightness, 0.7);
+    // Mean of (mask * LED) over the window; loud locked ≈ 0.5, scale to ≈1.
+    // No normalization by ledNorm so amplitude carries through to brightness.
+    float brightness = accum * (2.0 * invSamples);
+    brightness = clamp(brightness, 0.0, 1.0);
+    brightness = pow(brightness, u_gamma);
+    brightness = u_floor + (1.0 - u_floor) * brightness;
 
     float ringFrac = ringPos - float(ringIdx);
     float edge = min(ringFrac, 1.0 - ringFrac);
@@ -125,6 +129,8 @@ uniform int u_useAudioBuf;
 uniform float u_audioStart;
 uniform float u_audioStep;
 uniform float u_alpha;
+uniform float u_floor;
+uniform float u_gamma;
 
 const float TAU = 6.28318530717959;
 const int MAX_SAMPLES = 256;
@@ -179,7 +185,6 @@ void main() {
     float invSamples = 1.0 / float(u_samples);
 
     float accum = 0.0;
-    float ledNorm = 0.0;
 
     for (int j = 0; j < MAX_SAMPLES; j++) {
         if (j >= u_samples) break;
@@ -201,11 +206,12 @@ void main() {
         }
 
         accum += mask * led;
-        ledNorm += led;
     }
 
-    float brightness = accum / max(ledNorm, 1e-6);
-    brightness = pow(brightness, 0.7);
+    float brightness = accum * (2.0 * invSamples);
+    brightness = clamp(brightness, 0.0, 1.0);
+    brightness = pow(brightness, u_gamma);
+    brightness = u_floor + (1.0 - u_floor) * brightness;
 
     float ringFrac = ringPos - float(ringIdx);
     float edge = min(ringFrac, 1.0 - ringFrac);
@@ -287,6 +293,8 @@ const state = {
     numRings: 4,
     samples: 64,
     persistence: 60,
+    brightnessFloor: 15,
+    gamma: 0.35,
     diskPhase: 0,
     audioPhase: 0,
     lastFrameTime: 0,
@@ -299,7 +307,8 @@ function persistenceToAlpha(p) {
 
 const PERSIST_KEY = 'strobe-tuner-state-v1';
 const PERSIST_FIELDS = ['mode', 'fStrobe', 'audioFreq', 'detuneCents',
-    'activeNoteIdx', 'activeOctave', 'numRings', 'samples', 'persistence'];
+    'activeNoteIdx', 'activeOctave', 'numRings', 'samples', 'persistence',
+    'brightnessFloor', 'gamma'];
 
 function loadPersisted() {
     try {
@@ -322,10 +331,11 @@ function savePersisted() {
 
 loadPersisted();
 
-const multiPhases  = new Float32Array(MULTI_COUNT);
-const multiFreqs   = new Float32Array(MULTI_COUNT);
-const multiCenters = new Float32Array(MULTI_COUNT * 2);
-const multiRadii   = new Float32Array(MULTI_COUNT);
+const multiPhases    = new Float32Array(MULTI_COUNT);
+const intMultiPhases = new Float32Array(MULTI_COUNT);
+const multiFreqs     = new Float32Array(MULTI_COUNT);
+const multiCenters   = new Float32Array(MULTI_COUNT * 2);
+const multiRadii     = new Float32Array(MULTI_COUNT);
 let multiLayoutCSS = null;
 
 let audioCtx = null;
@@ -501,11 +511,13 @@ function getUniforms(prog, names) {
 
 const SINGLE_UNIFORMS = ['u_diskPhase', 'u_audioPhase', 'u_fDisk', 'u_fAudio', 'u_dt',
     'u_innerR', 'u_outerR', 'u_numRings', 'u_samples',
-    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha'];
+    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha',
+    'u_floor', 'u_gamma'];
 const MULTI_UNIFORMS = ['u_canvasSize', 'u_strobeCenters', 'u_strobeRadii',
     'u_strobePhases', 'u_strobeFreqs', 'u_strobeCount',
     'u_audioPhase', 'u_fAudio', 'u_dt', 'u_innerR', 'u_outerR', 'u_numRings', 'u_samples',
-    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha'];
+    'u_audioTex', 'u_useAudioBuf', 'u_audioStart', 'u_audioStep', 'u_alpha',
+    'u_floor', 'u_gamma'];
 
 const uSingle = getUniforms(programSingle, SINGLE_UNIFORMS);
 const uMulti  = getUniforms(programMulti, MULTI_UNIFORMS);
@@ -676,13 +688,6 @@ function updateLabels() {
     }
 }
 
-function advanceMultiPhases(dt) {
-    const TAU = 2 * Math.PI;
-    for (let i = 0; i < MULTI_COUNT; i++) {
-        multiPhases[i] = (multiPhases[i] + TAU * multiFreqs[i] * dt) % TAU;
-    }
-}
-
 function setReadouts(fStrobeRate, fAudio) {
     if (state.mode === 'multi') {
         const oct = state.activeOctave;
@@ -700,28 +705,42 @@ function setReadouts(fStrobeRate, fAudio) {
     }
 }
 
-function renderSingle(dt) {
+function renderSingle(dt, elapsed) {
     gl.useProgram(programSingle);
 
     const fStrobeRate = state.fStrobe;
     const fDiskRotation = fStrobeRate * 0.5;
     const fAudio = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
+    const TAU = 2 * Math.PI;
+
+    // state.diskPhase / audioPhase are kept at "phase as of now" (the render time).
+    // Advancing by true elapsed time guarantees the disk position tracks wall clock,
+    // so audio samples line up with where the disk really is during integration.
+    state.diskPhase = (state.diskPhase + TAU * fDiskRotation * elapsed) % TAU;
+    state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
 
     const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer();
+    const bufDuration = AUDIO_BUF_LEN / audioBufRate;
+    // When pulling from the audio buffer, the integration window can't exceed
+    // the buffer's own duration, otherwise disk-time and audio-time would diverge.
+    const intDt = usingBuf ? Math.min(dt, bufDuration) : dt;
 
-    gl.uniform1f(uSingle.u_diskPhase, state.diskPhase);
-    gl.uniform1f(uSingle.u_audioPhase, state.audioPhase);
+    // Shader integrates from t=0 to t=intDt; pass the phase at t=0 (intDt seconds ago).
+    const intDiskPhase = state.diskPhase - TAU * fDiskRotation * intDt;
+    const intAudioPhase = state.audioPhase - TAU * fAudio * intDt;
+
+    gl.uniform1f(uSingle.u_diskPhase, intDiskPhase);
+    gl.uniform1f(uSingle.u_audioPhase, intAudioPhase);
     gl.uniform1f(uSingle.u_fDisk, fDiskRotation);
     gl.uniform1f(uSingle.u_fAudio, fAudio);
-    gl.uniform1f(uSingle.u_dt, dt);
+    gl.uniform1f(uSingle.u_dt, intDt);
     gl.uniform1f(uSingle.u_innerR, 0.20);
     gl.uniform1f(uSingle.u_outerR, 0.92);
     gl.uniform1i(uSingle.u_numRings, state.numRings);
     gl.uniform1i(uSingle.u_samples, state.samples);
     gl.uniform1i(uSingle.u_useAudioBuf, usingBuf ? 1 : 0);
     if (usingBuf) {
-        const bufDuration = AUDIO_BUF_LEN / audioBufRate;
-        const span = Math.min(dt / bufDuration, 1);
+        const span = Math.min(intDt / bufDuration, 1);
         gl.uniform1f(uSingle.u_audioStart, 1 - span);
         gl.uniform1f(uSingle.u_audioStep, span);
     } else {
@@ -729,12 +748,10 @@ function renderSingle(dt) {
         gl.uniform1f(uSingle.u_audioStep, 0);
     }
     gl.uniform1f(uSingle.u_alpha, persistenceToAlpha(state.persistence));
+    gl.uniform1f(uSingle.u_floor, state.brightnessFloor / 100);
+    gl.uniform1f(uSingle.u_gamma, state.gamma);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    const TAU = 2 * Math.PI;
-    state.diskPhase = (state.diskPhase + TAU * fDiskRotation * dt) % TAU;
-    state.audioPhase = (state.audioPhase + TAU * fAudio * dt) % TAU;
 
     if (toneOsc && audioCtx) {
         toneOsc.frequency.setTargetAtTime(fAudio, audioCtx.currentTime, 0.01);
@@ -743,30 +760,45 @@ function renderSingle(dt) {
     setReadouts(fStrobeRate, fAudio);
 }
 
-function renderMulti(dt) {
+function renderMulti(dt, elapsed) {
     gl.useProgram(programMulti);
 
     updateMultiFreqs();
     const fAudio = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
+    const TAU = 2 * Math.PI;
+
+    // Advance phases to "now" by the true elapsed time so disk positions stay
+    // wall-clock-aligned even when frames stutter.
+    for (let i = 0; i < MULTI_COUNT; i++) {
+        multiPhases[i] = (multiPhases[i] + TAU * multiFreqs[i] * elapsed) % TAU;
+    }
+    state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
+
     const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer();
+    const bufDuration = AUDIO_BUF_LEN / audioBufRate;
+    const intDt = usingBuf ? Math.min(dt, bufDuration) : dt;
+
+    for (let i = 0; i < MULTI_COUNT; i++) {
+        intMultiPhases[i] = multiPhases[i] - TAU * multiFreqs[i] * intDt;
+    }
+    const intAudioPhase = state.audioPhase - TAU * fAudio * intDt;
 
     gl.uniform2f(uMulti.u_canvasSize, canvas.width, canvas.height);
     gl.uniform2fv(uMulti.u_strobeCenters, multiCenters);
     gl.uniform1fv(uMulti.u_strobeRadii, multiRadii);
-    gl.uniform1fv(uMulti.u_strobePhases, multiPhases);
+    gl.uniform1fv(uMulti.u_strobePhases, intMultiPhases);
     gl.uniform1fv(uMulti.u_strobeFreqs, multiFreqs);
     gl.uniform1i(uMulti.u_strobeCount, MULTI_COUNT);
-    gl.uniform1f(uMulti.u_audioPhase, state.audioPhase);
+    gl.uniform1f(uMulti.u_audioPhase, intAudioPhase);
     gl.uniform1f(uMulti.u_fAudio, fAudio);
-    gl.uniform1f(uMulti.u_dt, dt);
+    gl.uniform1f(uMulti.u_dt, intDt);
     gl.uniform1f(uMulti.u_innerR, 0.55);
     gl.uniform1f(uMulti.u_outerR, 1.0);
     gl.uniform1i(uMulti.u_numRings, state.numRings);
     gl.uniform1i(uMulti.u_samples, state.samples);
     gl.uniform1i(uMulti.u_useAudioBuf, usingBuf ? 1 : 0);
     if (usingBuf) {
-        const bufDuration = AUDIO_BUF_LEN / audioBufRate;
-        const span = Math.min(dt / bufDuration, 1);
+        const span = Math.min(intDt / bufDuration, 1);
         gl.uniform1f(uMulti.u_audioStart, 1 - span);
         gl.uniform1f(uMulti.u_audioStep, span);
     } else {
@@ -774,11 +806,10 @@ function renderMulti(dt) {
         gl.uniform1f(uMulti.u_audioStep, 0);
     }
     gl.uniform1f(uMulti.u_alpha, persistenceToAlpha(state.persistence));
+    gl.uniform1f(uMulti.u_floor, state.brightnessFloor / 100);
+    gl.uniform1f(uMulti.u_gamma, state.gamma);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    advanceMultiPhases(dt);
-    state.audioPhase = (state.audioPhase + 2 * Math.PI * fAudio * dt) % (2 * Math.PI);
 
     if (toneOsc && audioCtx) {
         toneOsc.frequency.setTargetAtTime(fAudio, audioCtx.currentTime, 0.01);
@@ -787,7 +818,7 @@ function renderMulti(dt) {
     setReadouts(state.fStrobe, fAudio);
 }
 
-function render(dt) {
+function render(dt, elapsed) {
     resizeCanvas();
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, accumFBO);
@@ -795,8 +826,8 @@ function render(dt) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    if (state.mode === 'multi') renderMulti(dt);
-    else renderSingle(dt);
+    if (state.mode === 'multi') renderMulti(dt, elapsed);
+    else renderSingle(dt, elapsed);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -807,14 +838,18 @@ function render(dt) {
 
 function loop(timeMs) {
     const t = timeMs / 1000;
-    let dt = state.lastFrameTime ? t - state.lastFrameTime : 1 / 60;
+    let elapsed = state.lastFrameTime ? t - state.lastFrameTime : 1 / 60;
     state.lastFrameTime = t;
-    if (dt > 0.1 || dt <= 0) dt = 1 / 60;
+    if (elapsed <= 0) elapsed = 1 / 60;
+
+    // Phase advances by true elapsed (keeps disk wall-clock-aligned across stutters);
+    // integration window is bounded so a hiccup doesn't try to integrate over a huge gap.
+    const dt = Math.min(elapsed, 0.1);
 
     state.fpsAvg = state.fpsAvg * 0.92 + (1 / dt) * 0.08;
     fpsReadout.textContent = state.fpsAvg.toFixed(1);
 
-    render(dt);
+    render(dt, elapsed);
     requestAnimationFrame(loop);
 }
 
@@ -938,6 +973,29 @@ persistenceSlider.addEventListener('input', () => {
 });
 persistenceSlider.addEventListener('change', savePersisted);
 
+const floorSlider = document.getElementById('floorSlider');
+const floorVal = document.getElementById('floorValue');
+floorSlider.addEventListener('input', () => {
+    state.brightnessFloor = parseFloat(floorSlider.value);
+    floorVal.textContent = `${state.brightnessFloor.toFixed(0)}%`;
+});
+floorSlider.addEventListener('change', savePersisted);
+
+const gammaSlider = document.getElementById('gammaSlider');
+const gammaVal = document.getElementById('gammaValue');
+gammaSlider.addEventListener('input', () => {
+    state.gamma = parseFloat(gammaSlider.value);
+    gammaVal.textContent = state.gamma.toFixed(2);
+});
+gammaSlider.addEventListener('change', savePersisted);
+
+const advancedDetails = document.getElementById('advancedAppearance');
+const ADVANCED_OPEN_KEY = 'strobe-tuner-advanced-open';
+if (localStorage.getItem(ADVANCED_OPEN_KEY) === 'true') advancedDetails.open = true;
+advancedDetails.addEventListener('toggle', () => {
+    localStorage.setItem(ADVANCED_OPEN_KEY, String(advancedDetails.open));
+});
+
 document.getElementById('rings').addEventListener('change', e => {
     state.numRings = parseInt(e.target.value, 10);
     savePersisted();
@@ -1026,6 +1084,10 @@ function syncAllUI() {
     detuneVal.textContent = `${dSign}${state.detuneCents.toFixed(1)}\u00A2`;
     persistenceSlider.value = String(state.persistence);
     persistenceVal.textContent = `${state.persistence.toFixed(0)}%`;
+    floorSlider.value = String(state.brightnessFloor);
+    floorVal.textContent = `${state.brightnessFloor.toFixed(0)}%`;
+    gammaSlider.value = String(state.gamma);
+    gammaVal.textContent = state.gamma.toFixed(2);
     document.getElementById('rings').value = String(state.numRings);
     document.getElementById('samples').value = String(state.samples);
     multiToggle.checked = (state.mode === 'multi');
