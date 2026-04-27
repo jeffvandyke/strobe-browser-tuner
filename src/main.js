@@ -284,7 +284,7 @@ const state = {
 
 const PERSIST_KEY = 'strobe-tuner-state-v1';
 const PERSIST_FIELDS = ['mode', 'fStrobe', 'audioFreq', 'detuneCents',
-    'activeNoteIdx', 'activeOctave', 'gamma'];
+    'activeNoteIdx', 'activeOctave', 'gamma', 'activeSource'];
 
 function loadPersisted() {
     try {
@@ -301,6 +301,8 @@ function savePersisted() {
     try {
         const out = {};
         for (const k of PERSIST_FIELDS) out[k] = state[k];
+        // loopback requires a user gesture each session; save as sine so we don't persist an un-restorable source
+        if (out.activeSource === 'loopback') out.activeSource = 'sine';
         localStorage.setItem(PERSIST_KEY, JSON.stringify(out));
     } catch (_) {}
 }
@@ -432,6 +434,7 @@ async function activateMic(deviceId) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio });
         attachStreamToAnalyser(stream);
         state.audioMode = 'mic';
+        updateSourceUI();
         await refreshDeviceList();
     } catch (e) {
         alert('Microphone unavailable: ' + (e.message || e));
@@ -463,6 +466,32 @@ function revertSourceSelector() {
     state.activeSource = 'sine';
     sourceSelect.value = 'sine';
     updateSourceUI();
+}
+
+async function initDevicesAndRestoreSource() {
+    if (!navigator.mediaDevices) return;
+    // If mic permission is already granted, briefly open a stream so enumerateDevices returns labels
+    try {
+        const perm = await navigator.permissions.query({ name: 'microphone' });
+        if (perm.state === 'granted') {
+            const s = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            });
+            s.getTracks().forEach(t => t.stop());
+        }
+    } catch (_) {}
+    await refreshDeviceList();
+    // Restore last mic source if the device is still available
+    const src = state.activeSource;
+    if (src === 'mic' || src.startsWith('mic:')) {
+        const deviceId = src.startsWith('mic:') ? src.slice(4) : undefined;
+        const optionExists = [...sourceSelect.options].some(o => o.value === src);
+        if (src === 'mic' || optionExists) {
+            sourceSelect.value = src;
+            activateMic(deviceId);
+        }
+    }
+    // loopback: never auto-restore — requires user gesture for getDisplayMedia
 }
 
 async function refreshDeviceList() {
@@ -1011,6 +1040,7 @@ sourceSelect.addEventListener('change', e => {
         activateLoopback();
     }
     updateSourceUI();
+    savePersisted();
 });
 
 const multiToggle = document.getElementById('multiMode');
@@ -1037,7 +1067,7 @@ multiToggle.addEventListener('change', e => {
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.addEventListener('devicechange', refreshDeviceList);
 }
-refreshDeviceList();
+initDevicesAndRestoreSource();
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) state.lastFrameTime = 0;
@@ -1063,9 +1093,8 @@ function syncAllUI() {
     gammaVal.textContent = state.gamma.toFixed(2);
     multiToggle.checked = (state.mode === 'multi');
     document.getElementById('playTone').checked = false;
-    sourceSelect.value = 'sine';
+    sourceSelect.value = 'sine';  // shown initially; updated after device enumeration restores mic
     state.audioMode = 'sine';
-    state.activeSource = 'sine';
     updateNoteHighlight();
     updateSourceUI();
 }
