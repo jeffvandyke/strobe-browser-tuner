@@ -666,14 +666,21 @@ for (let i = 0; i < MULTI_COUNT; i++) {
     el.className = 'strobe-label';
     const noteEl = document.createElement('span');
     noteEl.className = 'note';
-    const brEl = document.createElement('br');
     const freqEl = document.createElement('span');
     freqEl.className = 'freq';
+    const freq2El = document.createElement('span');
+    freq2El.className = 'freq ring-freq';
+    const freq3El = document.createElement('span');
+    freq3El.className = 'freq ring-freq';
     el.appendChild(noteEl);
-    el.appendChild(brEl);
+    el.appendChild(document.createElement('br'));
     el.appendChild(freqEl);
+    el.appendChild(document.createElement('br'));
+    el.appendChild(freq2El);
+    el.appendChild(document.createElement('br'));
+    el.appendChild(freq3El);
     labelContainer.appendChild(el);
-    labelEls.push({ el, noteEl, freqEl });
+    labelEls.push({ el, noteEl, freqEl, freq2El, freq3El });
 }
 
 function updateLabels() {
@@ -684,7 +691,10 @@ function updateLabels() {
         labelEls[i].el.style.left = pos.cx + 'px';
         labelEls[i].el.style.top = (pos.arcBottomY + 3) + 'px';
         labelEls[i].noteEl.textContent = NOTE_NAMES[i] + oct;
-        labelEls[i].freqEl.textContent = noteFreq(i, oct).toFixed(1);
+        const f = noteFreq(i, oct);
+        labelEls[i].freqEl.textContent = '\u25CE ' + f.toFixed(1) + ' \u25CE';
+        labelEls[i].freq2El.textContent = (f * 2).toFixed(1);
+        labelEls[i].freq3El.textContent = (f * 4).toFixed(1);
     }
 }
 

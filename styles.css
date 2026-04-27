@@ -104,6 +104,11 @@ header h1 {
     font-size: 0.6rem;
 }
 
+.strobe-label .ring-freq {
+    color: #4a5060;
+    font-size: 0.55rem;
+}
+
 .readout {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
