@@ -4,9 +4,26 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Strobe Browser Tuner</title>
+<meta name="description" content="Browser-based strobe tuner using WebGL2. Single-disk and 12-note chromatic multi-strobe modes. Works with microphone, system audio, or synthetic sine — no install required." />
+<meta property="og:title" content="Strobe Browser Tuner" />
+<meta property="og:description" content="WebGL2 strobe-disk tuner that runs entirely in your browser — no install, no dependencies." />
+<meta property="og:type" content="website" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<div id="strobeWarning" class="strobe-warning" role="alert">
+  <span><strong>Photosensitivity warning:</strong> This app displays rapidly flashing strobe patterns that may trigger seizures in people with photosensitive epilepsy or similar conditions.</span>
+  <button id="dismissWarning">Dismiss</button>
+</div>
+<script>
+  if (localStorage.getItem('strobe-warning-dismissed') === '1') {
+    document.getElementById('strobeWarning').hidden = true;
+  }
+  document.getElementById('dismissWarning').addEventListener('click', function() {
+    document.getElementById('strobeWarning').hidden = true;
+    localStorage.setItem('strobe-warning-dismissed', '1');
+  });
+</script>
 <main>
   <header>
     <h1>Strobe Browser Tuner</h1>
@@ -115,6 +132,7 @@
     <p>Strobe rate sets the lock frequency of the inner ring. The disk internally rotates at half this rate. Outer rings (4, 8, 16, 32, 64, 128, 256 segment-pairs) lock at 2&times; through 128&times; the strobe rate. 7 rings hard-coded; 256 integration samples per frame.</p>
     <p>Pitch reference: A4 = 440 Hz, equal temperament. The LED fires only at peak amplitude (top 10% of signal range), giving crisp lock indication.</p>
     <p>Picking an audio source (microphone or tab audio) replaces the synthetic sine with real-time samples; for tab audio, choose a tab in the share dialog and check &ldquo;Share tab audio&rdquo;.</p>
+    <p><a href="https://github.com/jeffvandyke/strobe-browser-tuner" target="_blank" rel="noopener">View source on GitHub</a></p>
   </footer>
 </main>
 <script src="src/main.js"></script>
