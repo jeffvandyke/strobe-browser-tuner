@@ -321,6 +321,12 @@ const audioBuf = new Float32Array(AUDIO_BUF_LEN);
 const audioU8 = new Uint8Array(AUDIO_BUF_LEN);
 let audioBufRate = 44100;
 
+// Audio-clock sync tracking
+let lastCaptureTime = 0;      // audioCtx.currentTime of most recent buffer capture
+let audioSyncOffset = NaN;   // baseline of (wallTime - audioTime); NaN until first capture
+let syncStrikes = 0;
+let syncStrikeWindowStart = 0;
+
 function ensureAudioCtx() {
     if (!audioCtx) {
         const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -350,7 +356,47 @@ function stopTone() {
     toneGain = null;
 }
 
+// Compute phase angle for a given frequency at a given audio-clock time.
+// Uses fractional-revolution form to stay precise for large time values
+// (avoids precision loss from TAU * freq * time when time is large).
+function audioPhaseAt(freq, time) {
+    const rev = freq * time;
+    return (rev - Math.floor(rev)) * (2 * Math.PI);
+}
+
+function resetAudioSync() {
+    audioSyncOffset = NaN;
+    syncStrikes = 0;
+    const w = document.getElementById('audioSyncWarning');
+    if (w) w.hidden = true;
+}
+
+// Compare wall-clock elapsed vs audio-clock elapsed each frame.
+// If the audio clock falls >50 ms behind wall clock (stall/throttle),
+// count a strike and resync the baseline. Three strikes in 10 s → show warning.
+function checkAudioSync(wallTime, audioTime) {
+    const offset = wallTime - audioTime;
+    if (isNaN(audioSyncOffset)) { audioSyncOffset = offset; return; }
+    const drift = offset - audioSyncOffset;
+    if (drift > 0.05) {
+        audioSyncOffset = offset; // resync baseline ("drop" to catch up)
+        if (syncStrikes === 0) syncStrikeWindowStart = wallTime;
+        else if (wallTime - syncStrikeWindowStart > 10) {
+            syncStrikes = 0;
+            syncStrikeWindowStart = wallTime;
+        }
+        if (++syncStrikes >= 3) {
+            const w = document.getElementById('audioSyncWarning');
+            if (w) w.hidden = false;
+        }
+    } else {
+        audioSyncOffset += (offset - audioSyncOffset) * 0.005; // slow baseline drift
+        if (wallTime - syncStrikeWindowStart > 10) syncStrikes = 0;
+    }
+}
+
 function cleanupCapture() {
+    resetAudioSync();
     if (micStream) {
         micStream.getTracks().forEach(t => t.stop());
         micStream = null;
@@ -529,9 +575,11 @@ const targetReadout = document.getElementById('targetReadout');
 const inputReadout = document.getElementById('inputReadout');
 const fpsReadout = document.getElementById('fpsReadout');
 
-function uploadAudioBuffer() {
+function uploadAudioBuffer(wallTime) {
     if (!analyser) return false;
     analyser.getFloatTimeDomainData(audioBuf);
+    lastCaptureTime = audioCtx.currentTime;
+    checkAudioSync(wallTime, lastCaptureTime);
 
     // Compute RMS over the buffer; use as threshold so any sustained signal level triggers.
     // RMS tracks average energy and is immune to brief transient peaks that would
@@ -661,7 +709,7 @@ function setReadouts(fStrobeRate, fAudio) {
 
 const INNER_R = 2 / 9; // 2 ring-widths of center gap with 7 rings
 
-function renderSingle(dt, elapsed) {
+function renderSingle(dt, elapsed, wallTime) {
     gl.useProgram(programSingle);
 
     const fStrobeRate = state.fStrobe;
@@ -669,16 +717,25 @@ function renderSingle(dt, elapsed) {
     const fAudio = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
     const TAU = 2 * Math.PI;
 
-    state.diskPhase = (state.diskPhase + TAU * fDiskRotation * elapsed) % TAU;
-    state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
-
-    const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer();
-    if (!usingBuf) { ledThreshold = LED_THRESHOLD_SINE; ledNorm = LED_NORM; }
+    const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer(wallTime);
     const bufDuration = AUDIO_BUF_LEN / audioBufRate;
     const intDt = usingBuf ? Math.min(dt, bufDuration) : dt;
 
-    const intDiskPhase = state.diskPhase - TAU * fDiskRotation * intDt;
-    const intAudioPhase = state.audioPhase - TAU * fAudio * intDt;
+    let intDiskPhase, intAudioPhase;
+    if (usingBuf) {
+        // Anchor to audio clock — avoids drift between performance.now() and audioCtx.currentTime.
+        state.diskPhase  = audioPhaseAt(fDiskRotation, lastCaptureTime);
+        state.audioPhase = audioPhaseAt(fAudio, lastCaptureTime);
+        intDiskPhase  = audioPhaseAt(fDiskRotation, lastCaptureTime - intDt);
+        intAudioPhase = audioPhaseAt(fAudio,        lastCaptureTime - intDt);
+    } else {
+        ledThreshold = LED_THRESHOLD_SINE;
+        ledNorm = LED_NORM;
+        state.diskPhase  = (state.diskPhase  + TAU * fDiskRotation * elapsed) % TAU;
+        state.audioPhase = (state.audioPhase + TAU * fAudio        * elapsed) % TAU;
+        intDiskPhase  = state.diskPhase  - TAU * fDiskRotation * intDt;
+        intAudioPhase = state.audioPhase - TAU * fAudio        * intDt;
+    }
 
     gl.uniform1f(uSingle.u_diskPhase, intDiskPhase);
     gl.uniform1f(uSingle.u_audioPhase, intAudioPhase);
@@ -709,27 +766,35 @@ function renderSingle(dt, elapsed) {
     setReadouts(fStrobeRate, fAudio);
 }
 
-function renderMulti(dt, elapsed) {
+function renderMulti(dt, elapsed, wallTime) {
     gl.useProgram(programMulti);
 
     updateMultiFreqs();
     const fAudio = state.audioFreq * Math.pow(2, state.detuneCents / 1200);
     const TAU = 2 * Math.PI;
 
-    for (let i = 0; i < MULTI_COUNT; i++) {
-        multiPhases[i] = (multiPhases[i] + TAU * multiFreqs[i] * elapsed) % TAU;
-    }
-    state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
-
-    const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer();
-    if (!usingBuf) { ledThreshold = LED_THRESHOLD_SINE; ledNorm = LED_NORM; }
+    const usingBuf = state.audioMode !== 'sine' && uploadAudioBuffer(wallTime);
     const bufDuration = AUDIO_BUF_LEN / audioBufRate;
     const intDt = usingBuf ? Math.min(dt, bufDuration) : dt;
 
-    for (let i = 0; i < MULTI_COUNT; i++) {
-        intMultiPhases[i] = multiPhases[i] - TAU * multiFreqs[i] * intDt;
+    let intAudioPhase;
+    if (usingBuf) {
+        for (let i = 0; i < MULTI_COUNT; i++) {
+            multiPhases[i]    = audioPhaseAt(multiFreqs[i], lastCaptureTime);
+            intMultiPhases[i] = audioPhaseAt(multiFreqs[i], lastCaptureTime - intDt);
+        }
+        state.audioPhase = audioPhaseAt(fAudio, lastCaptureTime);
+        intAudioPhase    = audioPhaseAt(fAudio, lastCaptureTime - intDt);
+    } else {
+        ledThreshold = LED_THRESHOLD_SINE;
+        ledNorm = LED_NORM;
+        for (let i = 0; i < MULTI_COUNT; i++) {
+            multiPhases[i]    = (multiPhases[i] + TAU * multiFreqs[i] * elapsed) % TAU;
+            intMultiPhases[i] = multiPhases[i] - TAU * multiFreqs[i] * intDt;
+        }
+        state.audioPhase = (state.audioPhase + TAU * fAudio * elapsed) % TAU;
+        intAudioPhase    = state.audioPhase - TAU * fAudio * intDt;
     }
-    const intAudioPhase = state.audioPhase - TAU * fAudio * intDt;
 
     gl.uniform2f(uMulti.u_canvasSize, canvas.width, canvas.height);
     gl.uniform2fv(uMulti.u_strobeCenters, multiCenters);
@@ -764,15 +829,15 @@ function renderMulti(dt, elapsed) {
     setReadouts(state.fStrobe, fAudio);
 }
 
-function render(dt, elapsed) {
+function render(dt, elapsed, wallTime) {
     resizeCanvas();
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.disable(gl.BLEND);
 
-    if (state.mode === 'multi') renderMulti(dt, elapsed);
-    else renderSingle(dt, elapsed);
+    if (state.mode === 'multi') renderMulti(dt, elapsed, wallTime);
+    else renderSingle(dt, elapsed, wallTime);
 }
 
 function loop(timeMs) {
@@ -786,7 +851,7 @@ function loop(timeMs) {
     state.fpsAvg = state.fpsAvg * 0.92 + (1 / dt) * 0.08;
     fpsReadout.textContent = state.fpsAvg.toFixed(1);
 
-    render(dt, elapsed);
+    render(dt, elapsed, t);
     requestAnimationFrame(loop);
 }
 
