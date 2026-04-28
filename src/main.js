@@ -229,6 +229,7 @@ const WHITE_NOTES = [0, 2, 4, 5, 7, 9, 11];
 const BLACK_NOTES = [1, 3, 6, 8, 10];
 const BLACK_X_POS = [1, 2, 4, 5, 6];
 const MULTI_COUNT = 12;
+const INNER_R = 2 / 9; // 2 ring-widths of center gap with 7 rings
 
 
 function noteFreq(noteIdx, octave) {
@@ -268,8 +269,8 @@ function createProgram(gl, vsSrc, fsSrc) {
 
 const state = {
     mode: 'single',
-    fStrobe: noteFreq(9, 4),
-    audioFreq: noteFreq(9, 4),
+    fStrobe: noteFreq(9, 2),
+    audioFreq: noteFreq(9, 2),
     detuneCents: 0,
     audioMode: 'sine',
     activeSource: 'sine',
@@ -737,8 +738,6 @@ function setReadouts(fStrobeRate, fAudio) {
     }
 }
 
-const INNER_R = 2 / 9; // 2 ring-widths of center gap with 7 rings
-
 function renderSingle(dt, elapsed, wallTime) {
     gl.useProgram(programSingle);
 
@@ -893,7 +892,6 @@ const sourceSelect = document.getElementById('audioSource');
 const noteContainer = document.getElementById('noteButtons');
 const noteButtonEls = [];
 const octaveBtns = document.querySelectorAll('#octaveButtons button');
-const noteRow = noteContainer;
 const strobeRateRow = document.getElementById('strobeRateRow');
 
 function freqToSliderV(f) {
@@ -1047,7 +1045,7 @@ function setMode(mode) {
     state.mode = mode;
     canvasWrap.classList.toggle('single-mode', mode === 'single');
     canvasWrap.classList.toggle('multi-mode', mode === 'multi');
-    if (noteRow) noteRow.style.display = mode === 'multi' ? 'none' : '';
+    if (noteContainer) noteContainer.style.display = mode === 'multi' ? 'none' : '';
     if (strobeRateRow) strobeRateRow.style.display = mode === 'multi' ? 'none' : '';
     updateNoteHighlight();
     requestAnimationFrame(() => {
@@ -1092,7 +1090,6 @@ function syncAllUI() {
     multiToggle.checked = (state.mode === 'multi');
     document.getElementById('playTone').checked = false;
     sourceSelect.value = 'sine';  // shown initially; updated after device enumeration restores mic
-    state.audioMode = 'sine';
     updateNoteHighlight();
     updateSourceUI();
 }
