@@ -649,13 +649,14 @@ function updateMultiLayout() {
     const dpr = canvas.width / cssW;
 
     const cellW = cssW / 7;
-    const labelGap = 18;
+    const labelGap = 22;
     const margin = 8;
     const stackGap = 4;
 
-    // r is constrained horizontally (±45° arc half-width = r*sin(45°) ≤ cellW/2)
+    // r is constrained horizontally: gap = cellW - 2*r*sin(45°) = 10% of arc width
+    // → r = cellW / (2 * sin(45°) * 1.1) ≈ cellW * 0.643
     // and vertically (two rows of r + labelGap must fit in canvas)
-    const horizMaxR = cellW * 0.45;
+    const horizMaxR = cellW * 0.643;
     const fitR = (cssH - 2 * margin - stackGap - 2 * labelGap) / 2;
     const r = Math.max(8, Math.min(horizMaxR, fitR));
 
