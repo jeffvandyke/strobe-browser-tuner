@@ -917,9 +917,7 @@ function updateNoteHighlight() {
         b.classList.toggle('active', matches && i === state.activeNoteIdx);
     });
     octaveBtns.forEach(b => {
-        b.classList.toggle('active',
-            (matches || state.mode === 'multi') &&
-            parseInt(b.dataset.octave, 10) === state.activeOctave);
+        b.classList.toggle('active', parseInt(b.dataset.octave, 10) === state.activeOctave);
     });
 }
 
