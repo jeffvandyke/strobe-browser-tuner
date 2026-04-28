@@ -953,16 +953,17 @@ rateSlider.addEventListener('input', () => {
     rateInput.value = fmtFreq(state.fStrobe);
     updateNoteHighlight();
 });
-function commitRateInput() {
+function applyRateInput(revertIfInvalid) {
     const v = parseFloat(rateInput.value);
-    if (!isFinite(v) || v <= 0) { syncRateUI(); return; }
+    if (!isFinite(v) || v <= 0) { if (revertIfInvalid) syncRateUI(); return; }
     state.fStrobe = Math.min(5000, Math.max(0.01, v));
     syncRateUI();
     updateNoteHighlight();
     savePersisted();
 }
 rateSlider.addEventListener('change', savePersisted);
-rateInput.addEventListener('change', commitRateInput);
+rateInput.addEventListener('input', () => applyRateInput(false));
+rateInput.addEventListener('change', () => applyRateInput(true));
 rateInput.addEventListener('keydown', e => { if (e.key === 'Enter') rateInput.blur(); });
 
 audioFreqSlider.addEventListener('input', () => {
@@ -971,14 +972,15 @@ audioFreqSlider.addEventListener('input', () => {
     updateNoteHighlight();
 });
 audioFreqSlider.addEventListener('change', savePersisted);
-function commitAudioFreqInput() {
+function applyAudioFreqInput(revertIfInvalid) {
     const v = parseFloat(audioFreqInput.value);
-    if (!isFinite(v) || v <= 0) { syncAudioFreqUI(); return; }
+    if (!isFinite(v) || v <= 0) { if (revertIfInvalid) syncAudioFreqUI(); return; }
     state.audioFreq = Math.min(20000, Math.max(0.01, v));
     syncAudioFreqUI();
     savePersisted();
 }
-audioFreqInput.addEventListener('change', commitAudioFreqInput);
+audioFreqInput.addEventListener('input', () => applyAudioFreqInput(false));
+audioFreqInput.addEventListener('change', () => applyAudioFreqInput(true));
 audioFreqInput.addEventListener('keydown', e => { if (e.key === 'Enter') audioFreqInput.blur(); });
 
 const detuneSlider = document.getElementById('detune');
