@@ -1,7 +1,7 @@
 // Strobe Browser Tuner — POC
 // Two display modes:
 //   single — one full-circle strobe disk
-//   multi  — 13-note piano layout, each note shown as a 90° arc strobe
+//   multi  — 12-note piano layout, each note shown as a 90° arc strobe
 
 const VERTEX_SHADER = `#version 300 es
 in vec2 a_position;
@@ -274,7 +274,7 @@ const state = {
     audioMode: 'sine',
     activeSource: 'sine',
     activeNoteIdx: 9,
-    activeOctave: 4,
+    activeOctave: 2,
     gamma: 2.0,
     diskPhase: 0,
     audioPhase: 0,
