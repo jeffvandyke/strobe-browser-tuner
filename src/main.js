@@ -230,6 +230,7 @@ const BLACK_NOTES = [1, 3, 6, 8, 10];
 const BLACK_X_POS = [1, 2, 4, 5, 6];
 const MULTI_COUNT = 12;
 const INNER_R = 2 / 9; // 2 ring-widths of center gap with 7 rings
+const AUDIO_OCTAVE = 4; // audio freq is always pinned to this octave (A4 = 440 Hz reference)
 
 
 function noteFreq(noteIdx, octave) {
@@ -270,7 +271,7 @@ function createProgram(gl, vsSrc, fsSrc) {
 const state = {
     mode: 'single',
     fStrobe: noteFreq(9, 2),
-    audioFreq: noteFreq(9, 2),
+    audioFreq: noteFreq(9, 4),
     detuneCents: 0,
     audioMode: 'sine',
     activeSource: 'sine',
@@ -925,9 +926,8 @@ for (let i = 0; i < 12; i++) {
     if (SHARP_SET.has(NOTE_NAMES[i])) btn.classList.add('sharp');
     btn.addEventListener('click', () => {
         state.activeNoteIdx = i;
-        const f = noteFreq(i, state.activeOctave);
-        state.fStrobe = f;
-        state.audioFreq = f;
+        state.fStrobe = noteFreq(i, state.activeOctave);
+        state.audioFreq = noteFreq(i, AUDIO_OCTAVE);
         syncRateUI();
         syncAudioFreqUI();
         updateNoteHighlight();
@@ -940,11 +940,8 @@ for (let i = 0; i < 12; i++) {
 octaveBtns.forEach(btn => {
     btn.addEventListener('click', () => {
         state.activeOctave = parseInt(btn.dataset.octave, 10);
-        const f = noteFreq(state.activeNoteIdx, state.activeOctave);
-        state.fStrobe = f;
-        state.audioFreq = f;
+        state.fStrobe = noteFreq(state.activeNoteIdx, state.activeOctave);
         syncRateUI();
-        syncAudioFreqUI();
         updateNoteHighlight();
         if (state.mode === 'multi') updateLabels();
         savePersisted();
