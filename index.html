@@ -11,19 +11,16 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<div id="strobeWarning" class="strobe-warning" role="alert">
-  <span><strong>Photosensitivity warning:</strong> This app displays rapidly flashing strobe patterns that may trigger seizures in people with photosensitive epilepsy or similar conditions.</span>
-  <button id="dismissWarning">Dismiss</button>
+<div id="consentOverlay" class="consent-overlay">
+  <div class="consent-panel">
+    <h2>Strobe Browser Tuner</h2>
+    <p class="consent-subtitle">WebGL2 strobe-disk simulation</p>
+    <button id="consentBtn" class="consent-btn">Power On Strobe</button>
+    <p class="consent-warning">
+      <strong>Photosensitivity warning:</strong> This app displays rapidly flashing strobe lights that may trigger seizures in people with photosensitive epilepsy or similar conditions.
+    </p>
+  </div>
 </div>
-<script>
-  if (localStorage.getItem('strobe-warning-dismissed') === '1') {
-    document.getElementById('strobeWarning').hidden = true;
-  }
-  document.getElementById('dismissWarning').addEventListener('click', function() {
-    document.getElementById('strobeWarning').hidden = true;
-    localStorage.setItem('strobe-warning-dismissed', '1');
-  });
-</script>
 <main>
   <header>
     <h1>Strobe Browser Tuner</h1>

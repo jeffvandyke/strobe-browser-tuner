@@ -1067,7 +1067,6 @@ multiToggle.addEventListener('change', e => {
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.addEventListener('devicechange', refreshDeviceList);
 }
-initDevicesAndRestoreSource();
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) state.lastFrameTime = 0;
@@ -1099,6 +1098,28 @@ function syncAllUI() {
     updateSourceUI();
 }
 
+const CONSENT_KEY = 'strobe-consent';
+
+function startStrobe() {
+    initDevicesAndRestoreSource();
+    requestAnimationFrame(loop);
+}
+
 syncAllUI();
 setMode(state.mode);
-requestAnimationFrame(loop);
+
+const consentOverlay = document.getElementById('consentOverlay');
+
+function hideConsentAndStart() {
+    consentOverlay.style.display = 'none';
+    startStrobe();
+}
+
+if (localStorage.getItem(CONSENT_KEY) === '1') {
+    hideConsentAndStart();
+} else {
+    document.getElementById('consentBtn').addEventListener('click', () => {
+        localStorage.setItem(CONSENT_KEY, '1');
+        hideConsentAndStart();
+    });
+}
