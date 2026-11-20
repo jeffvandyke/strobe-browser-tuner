@@ -15,7 +15,7 @@ Two display modes:
 - **Single mode** — one full-circle disk, strobe rate set manually
 - **Multi mode** — 12-note chromatic layout (piano-style), each note displayed as a 90° arc strobe; all notes of the selected octave shown simultaneously
 
-Each strobe display renders 7 concentric rings with doubling segment counts, so the fundamental and its next six octaves all appear at once.
+Each strobe display renders 7 concentric rings. With **Harmonics** rings they lock at 1× to 7× the strobe rate, one ring per partial. With **Octaves** rings the segment counts double from ring to ring, so the fundamental and its next six octaves appear at once, like a classic disk.
 
 ## How to use
 
@@ -36,10 +36,12 @@ For tab audio (Chrome only): click the audio source dropdown, choose "System / t
 
 ## Technical details
 
-- **Renderer**: WebGL2 fragment shader; stateless per-frame render (no accumulation buffer)
-- **Integration**: 256 sub-steps per frame across the integration window, wall-clock-aligned to prevent drift during frame-rate hiccups
-- **LED model**: fires only at peak amplitude (top 10% of signal range) for crisp lock indication
-- **Phase tracking**: disk and audio phases advance by true elapsed time, not capped `dt`
+- **Capture**: an AudioWorklet sends every input sample to the page with its sample number, so no sample is missed or read twice
+- **Fold**: each strobe adds every sample's lamp light at its phase of one period of the strobe rate (`src/fold.js`). A ring's pattern is the fold seen through the ring's segments, which is the same sum a spinning disk shows, so one fold gives every ring.
+- **Persistence**: the fold weights a sample of age *d* by *d*·e^(−*d*/τ), so it fades in and out smoothly. The window depends only on the samples, not on the frame rate.
+- **Lamp**: Linear light keeps each partial on its own ring. Half-wave light (a lamp that can't go below dark) and on/off light (a neon lamp that fires above the signal's RMS) mix the partials.
+- **Segments**: square segments pass the ring's own partial and its 3× and 5×. Sine segments pass only the ring's own partial.
+- **Renderer**: WebGL2 fragment shader that looks up each ring's pattern in a texture. Rings at or above half the sample rate stay dark.
 - **Pitch reference**: A4 = 440 Hz, equal temperament
 - **State persistence**: UI state is saved to `localStorage` and restored on reload
 
@@ -54,4 +56,4 @@ python3 -m http.server
 # open http://localhost:8000
 ```
 
-Or any static file server — the entire app is `index.html`, `styles.css`, and `src/main.js`.
+Or any static file server — the entire app is `index.html`, `styles.css`, `src/fold.js` and `src/main.js`.
