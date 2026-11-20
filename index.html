@@ -102,9 +102,47 @@
       </div>
     </div>
 
+    <div class="row">
+      <label class="grow">Lamp
+        <select id="lampSelect">
+          <option value="linear">Linear</option>
+          <option value="halfwave">Half-wave</option>
+          <option value="onoff">On/off (neon)</option>
+        </select>
+      </label>
+      <label class="grow">Segments
+        <select id="segmentsSelect">
+          <option value="sine">Sine</option>
+          <option value="square">Square</option>
+        </select>
+      </label>
+      <label class="grow">Rings
+        <select id="ringsSelect">
+          <option value="harmonics">Harmonics 1&ndash;7&times;</option>
+          <option value="octaves">Octaves 1&ndash;64&times;</option>
+        </select>
+      </label>
+    </div>
+
     <details id="advancedAppearance" class="advanced-panel">
       <summary>Advanced appearance</summary>
       <div class="advanced-content">
+
+        <label class="slider">
+          <div class="slider-row">
+            <span>Persistence</span>
+            <span id="persistenceValue">100 ms</span>
+          </div>
+          <input type="range" id="persistenceSlider" min="20" max="500" step="10" value="100" />
+        </label>
+
+        <label class="slider">
+          <div class="slider-row">
+            <span>Gain</span>
+            <span id="gainValue">1.00&times;</span>
+          </div>
+          <input type="range" id="gainSlider" min="0.5" max="4" step="0.05" value="1" />
+        </label>
 
         <label class="slider">
           <div class="slider-row">
@@ -126,12 +164,14 @@
   </section>
 
   <footer>
-    <p>Strobe rate sets the lock frequency of the inner ring. The disk internally rotates at half this rate. Outer rings (4, 8, 16, 32, 64, 128, 256 segment-pairs) lock at 2&times; through 128&times; the strobe rate. 7 rings hard-coded; 256 integration samples per frame.</p>
-    <p>Pitch reference: A4 = 440 Hz, equal temperament. The LED fires only at peak amplitude (top 10% of signal range), giving crisp lock indication.</p>
+    <p>Strobe rate sets the lock frequency of the inner ring. The disk rotates at half this rate. Each ring locks at a whole multiple of the strobe rate: 1&times; to 7&times; with Harmonics rings, or 1&times; to 64&times; in octaves with Octaves rings, like a classic disk. Rings at or above half the sample rate stay dark.</p>
+    <p>Every input sample is added to a fold: the lamp's light at its phase of one period of the strobe rate. Each ring shows the fold seen through its segments, which is what the eye sees on a spinning disk. The fold fades over the Persistence time, the same at any frame rate. Linear light keeps each partial on its own ring. Half-wave and on/off light mix the partials, as a real lamp does. Sine segments show only the ring's own partial; square segments also show its 3&times; and 5&times;.</p>
+    <p>Pitch reference: A4 = 440 Hz, equal temperament.</p>
     <p>Picking an audio source (microphone or tab audio) replaces the synthetic sine with real-time samples; for tab audio, choose a tab in the share dialog and check &ldquo;Share tab audio&rdquo;.</p>
     <p><a href="https://github.com/jeffvandyke/strobe-browser-tuner" target="_blank" rel="noopener">View source on GitHub</a></p>
   </footer>
 </main>
+<script src="src/fold.js"></script>
 <script src="src/main.js"></script>
 </body>
 </html>
